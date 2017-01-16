@@ -1,6 +1,6 @@
 #!/usr/bin/python27
 
-import boto, boto.sqs, sys, os, time, logging, re, gzip, random, shutil, socket, datetime
+import boto, boto.sqs, sys, os, time, logging, re, gzip, tarfile, random, shutil, socket, datetime
 from boto.s3.key import Key
 from boto.sqs.message import Message
 from optparse import OptionParser
@@ -24,12 +24,12 @@ script_name = sys.argv[0]
 usage = script_name + "--sample <name> --input <input> "
 # Parse command line
 parser = OptionParser()
-parser.add_option("--process-type", dest="processtype", default =None, choices=["worker", "submiter", "monitor","command"], 
+parser.add_option("--role-type", dest="roletype", default =None, choices=["worker", "submiter", "monitor","command"], 
                 help="[worker, submitter, monitor, command]")
 
 parser.add_option("--sample", dest="samples", action='append', default =[], help="sample name")
-parser.add_option("--inputbucket", dest="inputbucket", default ="pgdbinput", help="input bucket [ def: pgdbinput ]")
-parser.add_option("--outputbucket", dest="outputbucket", default ="pgdboutput", help="output bucket [ def : pgdboutput ] ")
+parser.add_option("--inputbucket", dest="inputbucket", default ="pgdbinput1", help="input bucket [ def: pgdbinput ]")
+parser.add_option("--outputbucket", dest="outputbucket", default ="pgdboutput1", help="output bucket [ def : pgdboutput ] ")
 
 parser.add_option("--readyqueue", dest="readyqueue", default ='ready', help="ready queue [ def: None ]")
 
@@ -41,11 +41,13 @@ parser.add_option("--submiter_dir", dest="submit_dir", default ="submit_dir", he
 parser.add_option("--worker_dir", dest="worker_dir", default ="/home/ubuntu/worker_dir", help="worker dir [ def : /home/ubuntu/worker_dir] ")
 
 
+parser.add_option("--download", dest="download", action='append', default = [], help="queues to clear [ def: [] ]")
+parser.add_option("--delete", dest="delete", action='store_true', default = False, help="removes the output file after downloading [ def: False]")
 parser.add_option("--clearqueue", dest="clearqueues", action='append', default = [], help="queues to clear [ def: [] ]")
 parser.add_option("--clearbucket", dest="clearbuckets", action='append',  default = [], help="queues to clear [ def: [] ]")
 
 parser.add_option("--status", dest="status", default =None, help="status by sample or jobid")
-parser.add_option("--key", dest="key", default =None, help="the AWS key")
+parser.add_option("--key", dest="key", default ='/home/ubuntu/.ssh/rootkey1.txt', help="the AWS key")
 
 
 
@@ -60,6 +62,16 @@ def printf(fmt, *args):
 def eprintf(fmt, *args):
    sys.stderr.write(fmt % args)
    sys.stderr.flush()
+
+def getstatusoutput(cmd):
+    """Return (status, output) of executing cmd in a shell."""
+    pipe = os.popen(cmd + ' 2>&1', 'r')
+    text = pipe.read()
+    sts = pipe.close()
+    if sts is None: sts = 0
+    if text[-1:] == '\n': text = text[:-1]
+    return sts, text
+
 
 
 def read_key(keyfile):
@@ -78,36 +90,22 @@ def read_key(keyfile):
 
 
 
-
-def do_some_work():
-   try:
-     print "\tBuilding PGDB"
-     time.sleep(5)
-   except:
-     return False
+def do_some_work(sample):
 
    return True
+   cmd = ['/home/ubuntu/pathway-tools/pathway-tools',  '-patho',  sample + '/ptools/', '-no-web-cel-overview',  '-no-taxonomic-pruning']
+
+   result = getstatusoutput(' '.join(cmd))
+
+   if result[0]==0:
+       return True
+   return False
 
 
 def gunzip_file(outputdir,  tar_gz_file):
-    import tarfile
     targz  = tarfile.open(outputdir + tar_gz_file)
     targz.extractall(path=outputdir)
     targz.close()
-
-def download_input_for_work(sample, inputfile) :
-    printf("Downloading sample: %s inputfile:  %s\n", sample, inputfile)
-    try:
-       bucket_conn= boto.connect_s3(aws_access_key_id = ACCESS_KEY, 
-                                        aws_secret_access_key=SECRET_KEY)
-       mybucket = bucket_conn.get_bucket(BUCKET_NAME) # Substitute in your bucket name
-       
-    #  outputdir,tar_gz_file = download_file(mybucket, inputfile)
-     #  gunzip_file(outputdir, tar_gz_file)
-
-    except:
-       return False
-    return True 
 
 def parse_message(msg, fields=3):
    mesPATT3= re.compile(r'SAMPLE\t(.*)\nFILENAME\t(.*)\nJOBID\t(.*)')
@@ -231,6 +229,16 @@ def upload_to_s3_bucket(conn, BUCKET_NAME, filepath):
     k.set_contents_from_filename(filepath)
 
 
+def upload_output_to_s3(options, samplename,  jobid):
+   bucket_conn = boto.connect_s3(aws_access_key_id = ACCESS_KEY, aws_secret_access_key=SECRET_KEY)
+
+#   print ACCESS_KEY, SECRET_KEY
+   upload_to_s3_bucket(bucket_conn, options.inputbucket, "/tmp/" + "jobid-" + jobid + "-"+ samplename + ".tar.gz")
+   logging.info("Uploaded sample:%s\n", samplename)
+   printf("\tuploaded : %s Bucket %s\n", samplename, options.inputbucket)
+   os.remove("/tmp/" + "jobid-" +  jobid + "-" + samplename + ".tar.gz")
+
+
 def upload_file_to_s3(options, samplename,  jobid):
    bucket_conn = boto.connect_s3(aws_access_key_id = ACCESS_KEY, aws_secret_access_key=SECRET_KEY)
 
@@ -256,7 +264,7 @@ def submit_sample_name_to_SQS(queuename, samplename, filename, jobid, hostname, 
 
    m.set_body("SAMPLE\t%s\nFILENAME\t%s\nJOBID\t%s\nHOSTNAME\t%s\nTIME\t%s\nSIZE\t%s\nDURATION\t%s\n" %(samplename, filename, jobid, hostname, event_time, size, time_min))
    q.write(m)
-   printf("\tINFO : SAMPLE\t%s; FILENAME\t%s\tJOBID\t%s; HOSTNAME\t%s; TIME\t%s; SIZE\t%s; DURATION\t%s\n" %(samplename, filename, jobid, hostname, event_time, size, time_min))
+   printf("\tINFO:\n\t\tSAMPLE\t%s\n\t\tFILENAME\t%s\n\t\tJOBID\t%s\n\t\tHOSTNAME\t%s\n\t\tTIME\t%s\n\t\tSIZE\t%s\n\t\tDURATION\t%s\n" %(samplename, filename, jobid, hostname, event_time, size, time_min))
 
  
 def sanity_check(foldername) :
@@ -343,21 +351,21 @@ def read_a_message(options):
 
      if sample==None:
        return None, None, None, None
-     printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s; HOSTNAME\t%s; TIME\t%s; SIZE\t%s; DURATION\t%s\n" %(sample, filename, jobid, hostname,  time_stamp, size, duration  ))
+     printf("\tRETRIVED:\n\t\tSAMPLE\t%s\n\t\tFILENAME\t%s\n\t\tJOBID\t%s\n\t\tHOSTNAME\t%s\n\t\tTIME\t%s\n\t\tSIZE\t%s\n\t\tDURATION\t%s\n" %(sample, filename, jobid, hostname,  time_stamp, size, duration  ))
 
      q.delete_message(m)
 
      return sample, filename, jobid, size
 
-def download_file(options, filename, delete=False):
+def download_file(bucketname, folder, filename, delete=False):
 
    printf("\tDownloading : %s\n",  filename)
    bucket_conn= boto.connect_s3(aws_access_key_id = ACCESS_KEY, 
                                         aws_secret_access_key=SECRET_KEY)
-   mybucket = bucket_conn.get_bucket(options.inputbucket) # Substitute in your bucket name
+   mybucket = bucket_conn.get_bucket(bucketname) # Substitute in your bucket name
 
    k = mybucket.get_key(filename)
-   result = k.get_contents_to_filename('/tmp/' + os.path.basename(filename))
+   result = k.get_contents_to_filename(folder +  os.path.basename(filename))
 
    if delete:
       k.delete()
@@ -392,10 +400,10 @@ def worker_daemon(options):
     if options.readyqueue!=None:
        print "READING : ", options.readyqueue
        sample, filename, jobid, size  = read_a_message(options)
-       print "\tSAMPLE %s; FILENAME : %s; JOBID : %s\n" %(sample, filename,jobid)
+       #print "\tSAMPLE %s; FILENAME : %s; JOBID : %s\n" %(sample, filename,jobid)
 
        if filename!=None:
-          result = download_file(options, filename, delete=True)
+          result = download_file(options.inputbucket, "/tmp/", filename, delete=True)
 
           gunzip_file(options.worker_dir,  '/tmp/' + filename)
           os.remove('/tmp/' + filename)
@@ -407,14 +415,25 @@ def worker_daemon(options):
              hostname = socket.gethostname().strip()
              submit_sample_name_to_SQS(options.runningqueue, sample, filename, jobid, hostname, start_time, size, start_min)
 
-          do_some_work()
+          success = do_some_work(sample)
           #shutil.rmtree( options.worker_dir + '/' + sample)
 
-          end_min =  str(time.time()/60)
-          if options.completequeue!=None:
-             print "\tUpdate Complete SQS : %s\n" %(options.completequeue)
-             submit_sample_name_to_SQS(options.completequeue, sample, filename, jobid, hostname,  start_time, size, end_min)
+          if success:
+             pgdbfolder='/home/ubuntu/ptools-local/pgdbs/user/' + sample.lower() + 'cyc'
+             if os.path.exists(pgdbfolder):
+                tar = tarfile.open('/tmp/' + sample.lower() + "cyc.tar.gz", "w:gz")
+                tar.add(pgdbfolder, arcname=sample.lower())
+                tar.close()
 
+
+             bucket_conn = boto.connect_s3(aws_access_key_id = ACCESS_KEY, aws_secret_access_key=SECRET_KEY)
+             upload_to_s3_bucket(bucket_conn, options.outputbucket, "/tmp/" +  sample.lower() + "cyc.tar.gz")
+             os.remove("/tmp/" +  sample.lower() + "cyc.tar.gz")
+
+             end_min =  str(time.time()/60)
+             if options.completequeue!=None:
+                print "\tUpdate Complete SQS : %s\n" %(options.completequeue)
+                submit_sample_name_to_SQS(options.completequeue, sample, filename, jobid, hostname,  start_time, size, end_min)
 
 
 def remove_job_from_SQS(queuename, samplename, filename, jobid):
@@ -464,6 +483,7 @@ def read_status(options, queuename, fields =3):
        rs=q.get_messages(10)
     # all_messages = q.get_messages(10)
 
+     statistics = {}
      for m in all_messages:
         if fields==3:
            sample, filename, jobid, _, _, _,_ = parse_message(m.get_body(), fields)
@@ -481,16 +501,36 @@ def read_status(options, queuename, fields =3):
            printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s;  HOSTNAME\t%s; TIME\t%s; SIZE\t%s\n" %(sample, filename,jobid, hostname,time_stamp, size))
         if fields==7:
            sample, filename, jobid, hostname, time_stamp, size, time_mins  = parse_message(m.get_body(), fields)
-           printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s;  HOSTNAME\t%s; TIME\t%s; SIZE\t%s; DURATION\t%s\n" %(sample, filename,jobid, hostname,time_stamp, size, time_mins))
+           #printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s;  HOSTNAME\t%s; TIME\t%s; SIZE\t%s; DURATION\t%s\n" %(sample, filename,jobid, hostname,time_stamp, size, time_mins))
+            
+           statistics[jobid] = [sample, filename, jobid, hostname, time_stamp, size, time_mins ]
 
+     return statistics 
 
 
 
 def monitor(options):
 
-    read_status(options, options.completequeue, fields=7)
-    read_status(options, options.runningqueue, fields=7)
-    read_status(options, options.submittedqueue, fields=7)
+    submitted = read_status(options, options.submittedqueue, fields=7)
+    running =read_status(options, options.runningqueue, fields=7)
+    complete = read_status(options, options.completequeue, fields=7)
+
+    for jobid in submitted:
+       printf("%s\t%s", jobid, submitted[jobid][0]);
+       if jobid in running:
+           printf("\t%s","RUNNING");
+       else:
+           printf("\t%s","       ");
+
+       if jobid in complete:
+           printf("\t%s","COMPLETE");
+       else:
+           printf("\t%s","       ");
+
+       if jobid in running and jobid in complete:
+            printf("\t%.2f\n", float(complete[jobid][6])-float(running[jobid][6]))
+       else:
+            printf("\t  \n")
 
 
 
@@ -533,21 +573,28 @@ def command(options):
       clear_bucket(options, bucketname)
 
 
+   for sample in options.download:
+     try:
+      result = download_file(options.outputbucket, "", sample.lower() + "cyc.tar.gz", delete=options.delete)
+     except:
+       print "ERROR: Failed to download %s\n" %(sample)
+
+
 def main(argv):
   (options, args) = parser.parse_args()
 
   read_key(options.key)
 
-  if options.processtype =="submiter":
+  if options.roletype =="submiter":
       submiter(options) 
 
-  if options.processtype =="worker":
+  if options.roletype =="worker":
       worker(options) 
 
-  if options.processtype =="monitor":
+  if options.roletype =="monitor":
       monitor(options) 
 
-  if options.processtype =="command":
+  if options.roletype =="command":
       command(options) 
 
 

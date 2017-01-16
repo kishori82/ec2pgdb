@@ -89,19 +89,6 @@ def do_some_work():
    return True
 
 
-
-def download_file(options, filename):
-
-   printf("Downloading filename %s\n",  filename)
-   bucket_conn= boto.connect_s3(aws_access_key_id = ACCESS_KEY, 
-                                        aws_secret_access_key=SECRET_KEY)
-   mybucket = bucket_conn.get_bucket(options.inputbucket) # Substitute in your bucket name
-
-   k = mybucket.get_key(filename)
-   k.get_contents_to_filename('/tmp/' + os.path.basename(filename))
-
-
-
 def gunzip_file(outputdir,  tar_gz_file):
     import tarfile
     targz  = tarfile.open(outputdir + tar_gz_file)
@@ -127,6 +114,7 @@ def parse_message(msg, fields=3):
    mesPATT4 = re.compile(r'SAMPLE\t(.*)\nFILENAME\t(.*)\nJOBID\t(.*)\nHOSTNAME\t(.*)')
    mesPATT5 = re.compile(r'SAMPLE\t(.*)\nFILENAME\t(.*)\nJOBID\t(.*)\nHOSTNAME\t(.*)\nTIME\t(.*)')
    mesPATT6 = re.compile(r'SAMPLE\t(.*)\nFILENAME\t(.*)\nJOBID\t(.*)\nHOSTNAME\t(.*)\nTIME\t(.*)\nSIZE\t(.*)')
+   mesPATT7 = re.compile(r'SAMPLE\t(.*)\nFILENAME\t(.*)\nJOBID\t(.*)\nHOSTNAME\t(.*)\nTIME\t(.*)\nSIZE\t(.*)\nDURATION\t(.*)')
 
    res = None
    if fields==3:
@@ -140,9 +128,14 @@ def parse_message(msg, fields=3):
    if fields==6:
       res = mesPATT6.search(msg)
 
+   if fields==7:
+      res = mesPATT7.search(msg)
+
+
    hostname = None
    time_stamp = None
    size = None
+   duration = None
    if res:
       sample = res.group(1)
       filename  = res.group(2)
@@ -159,13 +152,20 @@ def parse_message(msg, fields=3):
           hostname = res.group(4)
           time_stamp = res.group(5)
           size = res.group(6)
+
+      if fields==7:
+          hostname = res.group(4)
+          time_stamp = res.group(5)
+          size = res.group(6)
+          duration = res.group(7)
+
    else:
       sample = None
       filename = None
       jobid = None
       hostname = None
       time_stamp = None
-   return sample, filename, jobid, hostname, time_stamp, size
+   return sample, filename, jobid, hostname, time_stamp, size, duration
 
 def retrieve_a_job():
      conn = boto.sqs.connect_to_region(REGION, 
@@ -254,7 +254,7 @@ def submit_sample_name_to_SQS(queuename, samplename, filename, jobid, hostname, 
 
    m = Message()
 
-   m.set_body("SAMPLE\t%s\nFILENAME\t%s\nJOBID\t%s\nHOSTNAME\t%s\nTIME\t%s\nSIZE\t%sDURATION\t%s\n" %(samplename, filename, jobid, hostname, event_time, size, time_min))
+   m.set_body("SAMPLE\t%s\nFILENAME\t%s\nJOBID\t%s\nHOSTNAME\t%s\nTIME\t%s\nSIZE\t%s\nDURATION\t%s\n" %(samplename, filename, jobid, hostname, event_time, size, time_min))
    q.write(m)
    printf("\tINFO : SAMPLE\t%s; FILENAME\t%s\tJOBID\t%s; HOSTNAME\t%s; TIME\t%s; SIZE\t%s; DURATION\t%s\n" %(samplename, filename, jobid, hostname, event_time, size, time_min))
 
@@ -311,7 +311,7 @@ def submiter_daemon(options, samplename):
                   size = "large"
 
                submit_time =  str(datetime.datetime.now())
-               submit_min =  str(time.time()%60)
+               submit_min =  str(time.time()/60)
                hostname = socket.gethostname().strip()
  
                submit_sample_name_to_SQS(options.readyqueue + suffix, samplename, filename, jobid, hostname, submit_time, size, submit_min)
@@ -333,22 +333,23 @@ def read_a_message(options):
 
 
      if count == 0:
-       return None, None, None
+       return None, None, None, None
 
      m = q.read()
      #print 'm', m
      msg = str(m.get_body())
-     sample, filename, jobid,_, size= parse_message(msg)
+     sample, filename, jobid, hostname, time_stamp, size, duration= parse_message(msg, fields=7)
+
 
      if sample==None:
-       return None, None, None
-     printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s\n" %(sample, filename, jobid))
+       return None, None, None, None
+     printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s; HOSTNAME\t%s; TIME\t%s; SIZE\t%s; DURATION\t%s\n" %(sample, filename, jobid, hostname,  time_stamp, size, duration  ))
 
      q.delete_message(m)
 
      return sample, filename, jobid, size
 
-def download_file(options, filename):
+def download_file(options, filename, delete=False):
 
    printf("\tDownloading : %s\n",  filename)
    bucket_conn= boto.connect_s3(aws_access_key_id = ACCESS_KEY, 
@@ -357,6 +358,11 @@ def download_file(options, filename):
 
    k = mybucket.get_key(filename)
    result = k.get_contents_to_filename('/tmp/' + os.path.basename(filename))
+
+   if delete:
+      k.delete()
+
+
    return result
 
 
@@ -389,24 +395,25 @@ def worker_daemon(options):
        print "\tSAMPLE %s; FILENAME : %s; JOBID : %s\n" %(sample, filename,jobid)
 
        if filename!=None:
-          result = download_file(options, filename)
+          result = download_file(options, filename, delete=True)
+
           gunzip_file(options.worker_dir,  '/tmp/' + filename)
           os.remove('/tmp/' + filename)
 
           if options.runningqueue!=None:
              print "\tUpdate Running SQS : %s\n" %(options.runningqueue)
              start_time =  str(datetime.datetime.now()) 
-             start_min =  str(time.time()%60) 
+             start_min =  str(time.time()/60) 
              hostname = socket.gethostname().strip()
              submit_sample_name_to_SQS(options.runningqueue, sample, filename, jobid, hostname, start_time, size, start_min)
 
           do_some_work()
           #shutil.rmtree( options.worker_dir + '/' + sample)
 
-          end_time =  str(datetime.datetime.now())
+          end_min =  str(time.time()/60)
           if options.completequeue!=None:
              print "\tUpdate Complete SQS : %s\n" %(options.completequeue)
-             submit_sample_name_to_SQS(options.completequeue, sample, filename, jobid, hostname,  start_time, size)
+             submit_sample_name_to_SQS(options.completequeue, sample, filename, jobid, hostname,  start_time, size, end_min)
 
 
 
@@ -451,10 +458,11 @@ def read_status(options, queuename, fields =3):
      printf("\t# Jobs in SQS %s : %s\n",queuename, count)
 
      all_messages=[]
-     rs=q.get_messages(1)
+     rs=q.get_messages(10)
      while len(rs)>0:
        all_messages.extend(rs)
-       rs=q.get_messages(1)
+       rs=q.get_messages(10)
+    # all_messages = q.get_messages(10)
 
      for m in all_messages:
         if fields==3:
@@ -472,37 +480,17 @@ def read_status(options, queuename, fields =3):
            sample, filename, jobid, hostname, time_stamp,  size, _ = parse_message(m.get_body(), fields)
            printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s;  HOSTNAME\t%s; TIME\t%s; SIZE\t%s\n" %(sample, filename,jobid, hostname,time_stamp, size))
         if fields==7:
-           sample, filename, jobid, hostname, time_stamp, size, duration  = parse_message(m.get_body(), fields)
+           sample, filename, jobid, hostname, time_stamp, size, time_mins  = parse_message(m.get_body(), fields)
            printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s;  HOSTNAME\t%s; TIME\t%s; SIZE\t%s; DURATION\t%s\n" %(sample, filename,jobid, hostname,time_stamp, size, time_mins))
 
 
 
 
-
-
-
-        times =datetime.datetime(time_stamp)
-        print times
-
-
-     #rs = q.get_messages(visibility_timeout=0)
-
-#     sample, filename, jobid = parse_message(msg)
-
-#     if sample==None:
-#       return None, None, None
-#     printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s\n" %(sample, filename,jobid))
-
-#     q.delete_message(m)
-
-#     return sample, filename, jobid
-
-
 def monitor(options):
 
-    read_status(options, options.completequeue, fields=6)
-    read_status(options, options.runningqueue, fields=6)
-    read_status(options, options.submittedqueue, fields=6)
+    read_status(options, options.completequeue, fields=7)
+    read_status(options, options.runningqueue, fields=7)
+    read_status(options, options.submittedqueue, fields=7)
 
 
 

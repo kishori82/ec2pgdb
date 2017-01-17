@@ -17,6 +17,9 @@ BUCKET_NAME='ptools1431'
 #QUEUE_NAME="crazyqueue1367"
 QUEUE_NAME="crazyqueue1368"
 
+SMALL=10000
+LARGE=30000
+
 #logging.basicConfig(filename='debug.log',level=logging.DEBUG)
 logging.basicConfig(filename='info.log',level=logging.INFO)
 
@@ -43,6 +46,7 @@ parser.add_option("--worker_dir", dest="worker_dir", default ="/home/ubuntu/work
 
 parser.add_option("--download", dest="download", action='append', default = [], help="queues to clear [ def: [] ]")
 parser.add_option("--delete", dest="delete", action='store_true', default = False, help="removes the output file after downloading [ def: False]")
+parser.add_option("--stats", dest="stats", action='store_true', default = False, help="reports the number of small, medium and large size samples [ def: False]")
 parser.add_option("--clearqueue", dest="clearqueues", action='append', default = [], help="queues to clear [ def: [] ]")
 parser.add_option("--clearbucket", dest="clearbuckets", action='append',  default = [], help="queues to clear [ def: [] ]")
 
@@ -308,10 +312,10 @@ def submiter_daemon(options, samplename):
                filename = "jobid-" + jobid + "-" + samplename + ".tar.gz"
                suffix = "_large"
                size = "large"
-               if num < 5000:
+               if num < SMALL:
                   suffix = "_small"
                   size = "small"
-               elif num > 5000 and num < 15000:
+               elif num > SMALL and num < LARGE:
                   suffix = "_medium"
                   size = "medium"
                else:
@@ -578,6 +582,21 @@ def command(options):
       result = download_file(options.outputbucket, "", sample.lower() + "cyc.tar.gz", delete=options.delete)
      except:
        print "ERROR: Failed to download %s\n" %(sample)
+
+
+
+   if options.stats:
+     size={'SMALL':0, 'MEDIUM':0, 'LARGE':0}
+     for samplename in options.samples:
+        num = count_orfs(options.submit_dir + "/" + samplename)
+        if num < SMALL:
+            size['SMALL'] += 1
+        elif num > SMALL and num < LARGE:
+            size['MEDIUM'] += 1
+        else:
+            size['LARGE'] += 1
+
+     print 'SMALL :', size['SMALL'], 'MEDIUM :', size['MEDIUM'], 'LARGE :', size['LARGE'],
 
 
 def main(argv):

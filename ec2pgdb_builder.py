@@ -4,7 +4,7 @@ import boto, boto.sqs, sys, os, time, logging, re, gzip, tarfile, random, shutil
 from boto.s3.key import Key
 from boto.sqs.message import Message
 from optparse import OptionParser
-
+import optparse
 #sudo apt-get install python-pip
 #pip install -U boto
 
@@ -18,7 +18,7 @@ BUCKET_NAME='ptools1431'
 QUEUE_NAME="crazyqueue1368"
 
 SMALL=10000
-LARGE=30000
+LARGE=25000
 
 #logging.basicConfig(filename='debug.log',level=logging.DEBUG)
 logging.basicConfig(filename='info.log',level=logging.INFO)
@@ -27,33 +27,48 @@ script_name = sys.argv[0]
 usage = script_name + "--sample <name> --input <input> "
 # Parse command line
 parser = OptionParser()
-parser.add_option("--role-type", dest="roletype", default =None, choices=["worker", "submiter", "monitor","command"], 
+
+
+parser.add_option("--key", dest="key", default ='/home/ubuntu/.ssh/rootkey1.txt', help="the AWS key")
+parser.add_option("--role-type", dest="roletype", default =None, choices=["worker", "submitter", "monitor","command"], 
                 help="[worker, submitter, monitor, command]")
 
 parser.add_option("--sample", dest="samples", action='append', default =[], help="sample name")
-parser.add_option("--inputbucket", dest="inputbucket", default ="pgdbinput1", help="input bucket [ def: pgdbinput ]")
-parser.add_option("--outputbucket", dest="outputbucket", default ="pgdboutput1", help="output bucket [ def : pgdboutput ] ")
-
-parser.add_option("--readyqueue", dest="readyqueue", default ='ready', help="ready queue [ def: None ]")
-
-parser.add_option("--submittedqueue", dest="submittedqueue", default='submitted', help="ready queue [ def: submitted ]")
-parser.add_option("--runningqueue", dest="runningqueue", default ='running', help="running queue [ def: running ]")
-parser.add_option("--completequeue", dest="completequeue", default ='complete', help="complete queue [ def: complete] ")
-
-parser.add_option("--submiter_dir", dest="submit_dir", default ="submit_dir", help="submit dir [ def : /home/ubuntu/submit_dir ]")
-parser.add_option("--worker_dir", dest="worker_dir", default ="/home/ubuntu/worker_dir", help="worker dir [ def : /home/ubuntu/worker_dir] ")
 
 
-parser.add_option("--download", dest="download", action='append', default = [], help="queues to clear [ def: [] ]")
-parser.add_option("--delete", dest="delete", action='store_true', default = False, help="removes the output file after downloading [ def: False]")
-parser.add_option("--stats", dest="stats", action='store_true', default = False, help="reports the number of small, medium and large size samples [ def: False]")
-parser.add_option("--clearqueue", dest="clearqueues", action='append', default = [], help="queues to clear [ def: [] ]")
-parser.add_option("--clearbucket", dest="clearbuckets", action='append',  default = [], help="queues to clear [ def: [] ]")
 
-parser.add_option("--status", dest="status", default =None, help="status by sample or jobid")
-parser.add_option("--key", dest="key", default ='/home/ubuntu/.ssh/rootkey1.txt', help="the AWS key")
+aws_group = optparse.OptionGroup(parser, 'S3 and SQS options-inputs and queues')
+aws_group.add_option("--inputbucket", dest="inputbucket", default ="pgdbinput1", help="input bucket [ def: pgdbinput ]")
+aws_group.add_option("--outputbucket", dest="outputbucket", default ="pgdboutput1", help="output bucket [ def : pgdboutput ] ")
+
+aws_group.add_option("--readyqueue", dest="readyqueue", default ='ready', help="ready queue [ def: None ]")
+
+aws_group.add_option("--submittedqueue", dest="submittedqueue", default='submitted', help="ready queue [ def: submitted ]")
+aws_group.add_option("--runningqueue", dest="runningqueue", default ='running', help="running queue [ def: running ]")
+aws_group.add_option("--completequeue", dest="completequeue", default ='complete', help="complete queue [ def: complete] ")
+
+parser.add_option_group(aws_group)
+
+worker_group = optparse.OptionGroup(parser, 'worker group options')
+worker_group.add_option("--worker_dir", dest="worker_dir", default ="./", help="dir  where the ptools input is dumped for processing [default:  ./ ] ")
+parser.add_option_group(worker_group)
+
+submitter_group = optparse.OptionGroup(parser, 'submitter group options')
+submitter_group.add_option("--submitter_dir", dest="submit_dir", default ="./", help="dir where the inputs are [ default:  ./ ]")
+parser.add_option_group(submitter_group)
 
 
+command_group = optparse.OptionGroup(parser, 'monitor command options')
+
+command_group.add_option("--download", dest="download", action='append', default = [], help="download sample [ def: [] ]")
+command_group.add_option("--delete", dest="delete", action='store_true', default = False, help="removes the output file after downloading [ def: False]")
+command_group.add_option("--stats", dest="stats", action='store_true', default = False, help="reports the number of small, medium and large size samples [ def: False]")
+command_group.add_option("--clearqueue", dest="clearqueues", action='append', default = [], help="queues to clear [ def: [] ]")
+command_group.add_option("--clearbucket", dest="clearbuckets", action='append',  default = [], help="queues to clear [ def: [] ]")
+
+command_group.add_option("--status", dest="status", default =None, help="status by sample or jobid")
+
+parser.add_option_group(command_group)
 
 
 
@@ -222,7 +237,7 @@ def create_tarzip_file(foldername, jobid):
     with tarfile.open("/tmp/"+ "jobid-" + jobid + "-" + samplename + ".tar.gz", "w:gz") as tar:
        for name in [pf,  gen_elem, org_params] :
            print "\t", "adding :", name
-           tar.add(foldername, arcname=os.path.basename(foldername))
+           tar.add(name, arcname=os.path.basename(name))
 
 
 def upload_to_s3_bucket(conn, BUCKET_NAME, filepath):
@@ -273,8 +288,8 @@ def submit_sample_name_to_SQS(queuename, samplename, filename, jobid, hostname, 
  
 def sanity_check(foldername) :
      pf = foldername + "/ptools/" + "0.pf"
-     gen_elem= foldername + "/ptools/genetic-elements.dat"
-     org_params = foldername + "/ptools/organism-params.dat"
+     gen_elem= foldername + "/ptools" + "/genetic-elements.dat"
+     org_params = foldername + "/ptools" + "/organism-params.dat"
 
      if not os.path.exists(pf):
         return False
@@ -287,16 +302,16 @@ def sanity_check(foldername) :
 
      return True 
     
-def submiter(options):
-   for sample in options.samples:
-      print "SUBMITTING : ", sample
-      submiter_daemon(options, sample)
+def submitter(options):
+    for sample in options.samples:
+       print "SUBMITTING : ", sample
+       submitter_daemon(options, sample)
 
 
-def submiter_daemon(options, samplename):
+def submitter_daemon(options, samplename):
     if options.submit_dir!=None:
        if sanity_check(options.submit_dir + "/" + samplename):
-         print "\t", "#ORFS : ", count_orfs(options.submit_dir + "/" + samplename)
+         print "\t", "#ORFS : ", count_orfs(options.submit_dir + "/" + samplename )
          num = count_orfs(options.submit_dir + "/" + samplename)
           
          jobid = str(random.randrange(0,1000000000)) 
@@ -604,8 +619,8 @@ def main(argv):
 
   read_key(options.key)
 
-  if options.roletype =="submiter":
-      submiter(options) 
+  if options.roletype =="submitter":
+      submitter(options) 
 
   if options.roletype =="worker":
       worker(options) 

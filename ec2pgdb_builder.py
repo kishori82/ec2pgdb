@@ -90,10 +90,9 @@ def read_key(keyfile):
 
 
 
-def do_some_work(sample):
+def do_some_work(samplefolder):
 
-   return True
-   cmd = ['/home/ubuntu/pathway-tools/pathway-tools',  '-patho',  sample + '/ptools/', '-no-web-cel-overview',  '-no-taxonomic-pruning']
+   cmd = ['/home/ubuntu/pathway-tools/pathway-tools',  '-patho',  samplefolder + '/ptools/', '-no-web-cel-overview',  '-no-taxonomic-pruning']
 
    result = getstatusoutput(' '.join(cmd))
 
@@ -415,8 +414,8 @@ def worker_daemon(options):
              hostname = socket.gethostname().strip()
              submit_sample_name_to_SQS(options.runningqueue, sample, filename, jobid, hostname, start_time, size, start_min)
 
-          success = do_some_work(sample)
-          #shutil.rmtree( options.worker_dir + '/' + sample)
+          success = do_some_work(options.worker_dir + '/' + sample)
+          shutil.rmtree( options.worker_dir + '/' + sample)
 
           if success:
              pgdbfolder='/home/ubuntu/ptools-local/pgdbs/user/' + sample.lower() + 'cyc'

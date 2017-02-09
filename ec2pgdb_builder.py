@@ -41,7 +41,7 @@ aws_group = optparse.OptionGroup(parser, 'S3 and SQS options-inputs and queues')
 aws_group.add_option("--inputbucket", dest="inputbucket", default ="pgdbinput1", help="input bucket [ def: pgdbinput ]")
 aws_group.add_option("--outputbucket", dest="outputbucket", default ="pgdboutput1", help="output bucket [ def : pgdboutput ] ")
 
-aws_group.add_option("--readyqueue", dest="readyqueue", default ='ready', help="ready queue [ def: None ]")
+aws_group.add_option("--readyqueue", dest="readyqueue", default =None, help="ready queue [ def: None ]")
 
 aws_group.add_option("--submittedqueue", dest="submittedqueue", default='submitted', help="ready queue [ def: submitted ]")
 aws_group.add_option("--runningqueue", dest="runningqueue", default ='running', help="running queue [ def: running ]")
@@ -111,7 +111,7 @@ def read_key(keyfile):
 
 def do_some_work(samplefolder):
 
-   cmd = ['/home/ubuntu/pathway-tools/pathway-tools',  '-patho',  samplefolder + '/ptools/', '-no-web-cel-overview',  '-no-taxonomic-pruning']
+   cmd = ['/home/ubuntu/pathway-tools/pathway-tools',  '-patho',  samplefolder + '/', '-no-web-cel-overview',  '-no-taxonomic-pruning']
 
    result = getstatusoutput(' '.join(cmd))
 
@@ -189,7 +189,7 @@ def retrieve_a_job():
                                        aws_secret_access_key=SECRET_KEY)
      q = conn.get_queue(QUEUE_NAME)
      if q==None:
-        print "ERROR: SQS my-queue does not exist"
+        print "ERROR: SQS queue %s does not exist"  %(QUEUE_NAME)
         sys.exit(0)
 
      count = q.count()
@@ -423,7 +423,8 @@ def worker_daemon(options):
        if filename!=None:
           result = download_file(options.inputbucket, "/tmp/", filename, delete=True)
 
-          gunzip_file(options.worker_dir,  '/tmp/' + filename)
+          os.makedirs(options.worker_dir + '/' + sample)
+          gunzip_file(options.worker_dir + '/' + sample,  '/tmp/' + filename)
           os.remove('/tmp/' + filename)
 
           if options.runningqueue!=None:
@@ -442,6 +443,8 @@ def worker_daemon(options):
                 tar = tarfile.open('/tmp/' + sample.lower() + "cyc.tar.gz", "w:gz")
                 tar.add(pgdbfolder, arcname=sample.lower())
                 tar.close()
+                     
+             shutil.rmtree(pgdbflder)
 
 
              bucket_conn = boto.connect_s3(aws_access_key_id = ACCESS_KEY, aws_secret_access_key=SECRET_KEY)

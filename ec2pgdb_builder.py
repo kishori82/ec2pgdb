@@ -444,7 +444,7 @@ def worker_daemon(options):
                 tar.add(pgdbfolder, arcname=sample.lower())
                 tar.close()
                      
-             shutil.rmtree(pgdbflder)
+             shutil.rmtree(pgdbfolder)
 
 
              bucket_conn = boto.connect_s3(aws_access_key_id = ACCESS_KEY, aws_secret_access_key=SECRET_KEY)

@@ -2,4 +2,4 @@ rootkey.csv
 data/output/*
 info.log
 *.tar.gz
-
+pwy_extract/output/*

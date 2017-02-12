@@ -1,0 +1,4 @@
+Ex. 1. python ec2pgdb_builder.py --role-type submitter --k ~/.ssh/kishori.csail.csv  --submitter_dir ~/Tara_Ocean/output/   --sample CENL 
+Ex. 2. for f in `cat s`;  do echo $f; python ec2pgdb_builder.py --role-type submitter --k ~/.ssh/kishori.csail.csv  --submitter_dir ~/Tara_Ocean/output/   --sample ${f}; done;
+
+aws  ec2  describe-instances  --query  Reservations[*].Instances[*].[InstanceId,Tags[?Key==`Name`].Value|[0],State.Name,PrivateIpAddress,PublicIpAddress]  --output  text

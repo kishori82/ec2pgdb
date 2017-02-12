@@ -17,8 +17,8 @@ BUCKET_NAME='ptools1431'
 #QUEUE_NAME="crazyqueue1367"
 QUEUE_NAME="crazyqueue1368"
 
-SMALL=10000
-LARGE=25000
+SMALL=1000
+LARGE=5000
 
 #logging.basicConfig(filename='debug.log',level=logging.DEBUG)
 logging.basicConfig(filename='info.log',level=logging.INFO)
@@ -30,18 +30,17 @@ parser = OptionParser()
 
 
 parser.add_option("--key", dest="key", default ='/home/ubuntu/.ssh/rootkey1.txt', help="the AWS key")
-parser.add_option("--role-type", dest="roletype", default =None, choices=["worker", "submitter", "monitor","command"], 
-                help="[worker, submitter, monitor, command]")
+parser.add_option("--role-type", dest="roletype", default =None, choices=["worker", "submitter", "uploader", "monitor","command"], 
+                help="[worker, submitter, uploader,  monitor, command]")
 
 parser.add_option("--sample", dest="samples", action='append', default =[], help="sample name")
-
 
 
 aws_group = optparse.OptionGroup(parser, 'S3 and SQS options-inputs and queues')
 aws_group.add_option("--inputbucket", dest="inputbucket", default ="pgdbinput1", help="input bucket [ def: pgdbinput ]")
 aws_group.add_option("--outputbucket", dest="outputbucket", default ="pgdboutput1", help="output bucket [ def : pgdboutput ] ")
 
-aws_group.add_option("--readyqueue", dest="readyqueue", default =None, help="ready queue [ def: None ]")
+aws_group.add_option("--readyqueue", dest="readyqueue", default ="ready",  help="ready queue [ def: None ]")
 
 aws_group.add_option("--submittedqueue", dest="submittedqueue", default='submitted', help="ready queue [ def: submitted ]")
 aws_group.add_option("--runningqueue", dest="runningqueue", default ='running', help="running queue [ def: running ]")
@@ -57,20 +56,24 @@ submitter_group = optparse.OptionGroup(parser, 'submitter group options')
 submitter_group.add_option("--submitter_dir", dest="submit_dir", default ="./", help="dir where the inputs are [ default:  ./ ]")
 parser.add_option_group(submitter_group)
 
+monitor_group = optparse.OptionGroup(parser, 'monitor options')
+monitor_group.add_option("--stats", dest="stats", action='store_true', default = False, help="reports the number of small, medium and large size samples [ def: False]")
+monitor_group.add_option("--status", dest="status", default =None, help="status by sample or jobid")
+parser.add_option_group(monitor_group)
 
-command_group = optparse.OptionGroup(parser, 'monitor command options')
+uploader_group = optparse.OptionGroup(parser, 'uploader options')
+#uploader_group.add_option("--sample", dest="samples", action='append', default =[], help="sample name")
+aws_group.add_option("--pgdbextractinput", dest="pgdbextractinput", default ="pgdbextractinput", help="PGDB extract input bucket [ def: pgdbextractinput ]")
+parser.add_option_group(uploader_group)
 
+
+command_group = optparse.OptionGroup(parser, 'command options')
 command_group.add_option("--download", dest="download", action='append', default = [], help="download sample [ def: [] ]")
 command_group.add_option("--delete", dest="delete", action='store_true', default = False, help="removes the output file after downloading [ def: False]")
-command_group.add_option("--stats", dest="stats", action='store_true', default = False, help="reports the number of small, medium and large size samples [ def: False]")
 command_group.add_option("--clearqueue", dest="clearqueues", action='append', default = [], help="queues to clear [ def: [] ]")
 command_group.add_option("--clearbucket", dest="clearbuckets", action='append',  default = [], help="queues to clear [ def: [] ]")
 
-command_group.add_option("--status", dest="status", default =None, help="status by sample or jobid")
-
 parser.add_option_group(command_group)
-
-
 
 def fprintf(file, fmt, *args):
    file.write(fmt % args)
@@ -342,6 +345,59 @@ def submitter_daemon(options, samplename):
  
                submit_sample_name_to_SQS(options.readyqueue + suffix, samplename, filename, jobid, hostname, submit_time, size, submit_min)
                submit_sample_name_to_SQS(options.submittedqueue, samplename, filename, jobid, hostname, submit_time, size, submit_min)
+
+def uploader(options):
+    for sample in options.samples:
+       print "UPLOADING : ", sample
+       uploader_daemon(options, sample)
+
+def create_upload_file(foldername):
+    import tarfile
+
+    samplename = os.path.basename(foldername)
+    pf = foldername + "/ptools/" + "0.pf"
+    gen_elem= foldername + "/ptools/genetic-elements.dat"
+    org_params = foldername + "/ptools/organism-params.dat"
+    table = foldername + "/results/annotation_table/" + samplename + ".functional_and_taxonomic_table.txt"
+
+
+    with tarfile.open("/tmp/"+ samplename + ".tar.gz", "w:gz") as tar:
+       t = tarfile.TarInfo(samplename)
+       t.type = tarfile.DIRTYPE
+       t.mode = 0755
+       t.mtime = time.time()
+       tar.addfile(t)
+
+       t = tarfile.TarInfo(samplename + '/ptools')
+       t.type = tarfile.DIRTYPE
+       t.mode = 0755
+       t.mtime = time.time()
+       tar.addfile(t)
+
+       tar.add(table, arcname=samplename + '/' +  samplename + ".functional_and_taxonomic_table.txt")
+
+       print "\t", "adding :", pf
+       tar.add(pf, arcname=samplename + '/ptools/0.pf')
+       print "\t", "adding :", org_params
+       tar.add(pf, arcname=samplename + '/ptools/organism-params.dat')
+       print "\t", "adding :", gen_elem
+       tar.add(pf, arcname=samplename + '/ptools/genetic-elements.dat')
+
+
+def uploader_daemon(options, samplename):
+    if options.submit_dir!=None:
+       if sanity_check(options.submit_dir + "/" + samplename):
+         print "\t", "#ORFS : ", count_orfs(options.submit_dir + "/" + samplename )
+         num = count_orfs(options.submit_dir + "/" + samplename)
+          
+         create_upload_file(options.submit_dir + "/" + samplename)
+
+         bucket_conn = boto.connect_s3(aws_access_key_id = ACCESS_KEY, aws_secret_access_key=SECRET_KEY)
+
+         upload_to_s3_bucket(bucket_conn, options.pgdbextractinput, "/tmp/" + samplename + ".tar.gz")
+         logging.info("Uploaded pgdb extract input for  sample:%s\n", samplename + ".tar.gz")
+         printf("\tuploaded : %s Bucket %s\n", samplename, options.pgdbextractinput)
+         os.remove("/tmp/"+ samplename + ".tar.gz")
 
 
 def read_a_message(options):
@@ -623,6 +679,9 @@ def main(argv):
 
   if options.roletype =="submitter":
       submitter(options) 
+
+  if options.roletype =="uploader":
+      uploader(options) 
 
   if options.roletype =="worker":
       worker(options) 

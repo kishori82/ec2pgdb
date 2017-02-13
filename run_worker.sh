@@ -12,5 +12,6 @@ else
     echo ""
     return
 fi
+rm -rf ~/worker_dir/*
 
 python ec2pgdb_builder.py --role-type worker --worker_dir /home/ubuntu/worker_dir/ --key /home/ubuntu/.ssh/kishori.csail.csv --readyqueue ready_$1

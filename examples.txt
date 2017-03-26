@@ -2,3 +2,7 @@ Ex. 1. python ec2pgdb_builder.py --role-type submitter --k ~/.ssh/kishori.csail.
 Ex. 2. for f in `cat s`;  do echo $f; python ec2pgdb_builder.py --role-type submitter --k ~/.ssh/kishori.csail.csv  --submitter_dir ~/Tara_Ocean/output/   --sample ${f}; done;
 
 aws  ec2  describe-instances  --query  Reservations[*].Instances[*].[InstanceId,Tags[?Key==`Name`].Value|[0],State.Name,PrivateIpAddress,PublicIpAddress]  --output  text
+
+for f in `cat /tmp/t`; do echo $f; ssh -i /home/sgeadmin/.ssh/kishori_konwar1.pem  ubuntu@${f} "ls /home/ubuntu/ec2pgdb/pwy_extract/output/"; done;
+
+ for f in `cat list1.txt`; do echo $f; python ec2pgdb_builder.py --role-type uploader --submitter_dir ~/Tara_Ocean/SYNTHETIC/output  --sample ${f} --key ~/.ssh/kishori.csail.csv ; done;

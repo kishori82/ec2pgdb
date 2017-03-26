@@ -271,7 +271,7 @@ class PythonCyc:
         result = self.retrieve_results_string()
         return result
 
-    TIME = 10
+    TIME = 300
     
 
     def sendStartSignal(self):

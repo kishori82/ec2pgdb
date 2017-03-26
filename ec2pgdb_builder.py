@@ -63,7 +63,7 @@ parser.add_option_group(monitor_group)
 
 uploader_group = optparse.OptionGroup(parser, 'uploader options')
 #uploader_group.add_option("--sample", dest="samples", action='append', default =[], help="sample name")
-aws_group.add_option("--pgdbextractinput", dest="pgdbextractinput", default ="pgdbextractinput", help="PGDB extract input bucket [ def: pgdbextractinput ]")
+uploader_group.add_option("--pgdbextractinput", dest="pgdbextractinput", default ="pgdbextractinput", help="PGDB extract input bucket [ def: pgdbextractinput ]")
 parser.add_option_group(uploader_group)
 
 
@@ -358,6 +358,7 @@ def create_upload_file(foldername):
     pf = foldername + "/ptools/" + "0.pf"
     gen_elem= foldername + "/ptools/genetic-elements.dat"
     org_params = foldername + "/ptools/organism-params.dat"
+    reduced = foldername + "/ptools/reduced.txt"
     table = foldername + "/results/annotation_table/" + samplename + ".functional_and_taxonomic_table.txt"
 
 
@@ -374,6 +375,7 @@ def create_upload_file(foldername):
        t.mtime = time.time()
        tar.addfile(t)
 
+       print "\t", "adding :", table
        tar.add(table, arcname=samplename + '/' +  samplename + ".functional_and_taxonomic_table.txt")
 
        print "\t", "adding :", pf
@@ -382,6 +384,9 @@ def create_upload_file(foldername):
        tar.add(pf, arcname=samplename + '/ptools/organism-params.dat')
        print "\t", "adding :", gen_elem
        tar.add(pf, arcname=samplename + '/ptools/genetic-elements.dat')
+       if os.path.exists(reduced):
+         print "\t", "adding :", reduced
+         tar.add(pf, arcname=samplename + '/ptools/reduced.txt')
 
 
 def uploader_daemon(options, samplename):

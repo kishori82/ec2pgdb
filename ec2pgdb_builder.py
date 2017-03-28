@@ -1,6 +1,7 @@
 #!/usr/bin/python27
 
-import boto, boto.sqs, sys, os, time, logging, re, gzip, tarfile, random, shutil, socket, datetime
+import boto, boto.sqs, boto.ec2, sys, os, time, logging, re, gzip, tarfile, random, shutil, socket, datetime
+
 from boto.s3.key import Key
 from boto.sqs.message import Message
 from optparse import OptionParser
@@ -13,12 +14,12 @@ import optparse
 REGION = "us-east-1"
 ACCESS_KEY=""
 SECRET_KEY=""
-BUCKET_NAME='ptools1431'
+BUCKET_NAME='pgdbinput1'
 #QUEUE_NAME="crazyqueue1367"
 QUEUE_NAME="crazyqueue1368"
 
-SMALL=1000
-LARGE=5000
+SMALL=100
+LARGE=1000
 
 #logging.basicConfig(filename='debug.log',level=logging.DEBUG)
 logging.basicConfig(filename='info.log',level=logging.INFO)
@@ -37,8 +38,8 @@ parser.add_option("--sample", dest="samples", action='append', default =[], help
 
 
 aws_group = optparse.OptionGroup(parser, 'S3 and SQS options-inputs and queues')
-aws_group.add_option("--inputbucket", dest="inputbucket", default ="pgdbinput1", help="input bucket [ def: pgdbinput ]")
-aws_group.add_option("--outputbucket", dest="outputbucket", default ="pgdboutput1", help="output bucket [ def : pgdboutput ] ")
+aws_group.add_option("--inputbucket", dest="inputbucket", default ="pgdbinput1", help="input bucket [ def: pgdbinput1 ]")
+aws_group.add_option("--outputbucket", dest="outputbucket", default ="pgdboutput1", help="output bucket [ def : pgdboutput1 ] ")
 
 aws_group.add_option("--readyqueue", dest="readyqueue", default ="ready",  help="ready queue [ def: None ]")
 
@@ -59,6 +60,12 @@ parser.add_option_group(submitter_group)
 monitor_group = optparse.OptionGroup(parser, 'monitor options')
 monitor_group.add_option("--stats", dest="stats", action='store_true', default = False, help="reports the number of small, medium and large size samples [ def: False]")
 monitor_group.add_option("--status", dest="status", default =None, help="status by sample or jobid")
+monitor_group.add_option("--status-jobs", dest="status_jobs", action='store_true', default=False, help="status by sample or jobid")
+monitor_group.add_option("--status-servers", dest="status_servers", action='store_true', default=False, help="status by servers by latest completion")
+monitor_group.add_option("--status-SQS", dest="status_SQS", action='store_true', default=False, help="status by printing the SQSs")
+monitor_group.add_option("--verbose", dest="verbose", action='store_true', default=False, help="print the detailed SQS queues")
+
+
 parser.add_option_group(monitor_group)
 
 uploader_group = optparse.OptionGroup(parser, 'uploader options')
@@ -184,6 +191,7 @@ def parse_message(msg, fields=3):
       jobid = None
       hostname = None
       time_stamp = None
+
    return sample, filename, jobid, hostname, time_stamp, size, duration
 
 def retrieve_a_job():
@@ -305,6 +313,7 @@ def sanity_check(foldername) :
      return True 
     
 def submitter(options):
+
     for sample in options.samples:
        print "SUBMITTING : ", sample
        submitter_daemon(options, sample)
@@ -409,6 +418,7 @@ def read_a_message(options):
      conn = boto.sqs.connect_to_region(REGION, 
                                        aws_access_key_id = ACCESS_KEY, 
                                        aws_secret_access_key=SECRET_KEY)
+
      q = conn.get_queue(options.readyqueue)
      if q==None:
         print "ERROR: SQS my-queue does not exist"
@@ -418,12 +428,14 @@ def read_a_message(options):
      logging.info("Number of jobs in queue:%s", count)
      printf("\t# Jobs in SQS %s : %s\n",options.readyqueue, count)
 
-
      if count == 0:
        return None, None, None, None
 
+     rs = q.get_messages()
+     print rs[0].get_body()
+
      m = q.read()
-     #print 'm', m
+     print 'm', m
      msg = str(m.get_body())
      sample, filename, jobid, hostname, time_stamp, size, duration= parse_message(msg, fields=7)
 
@@ -558,61 +570,101 @@ def read_status(options, queuename, fields =3):
      logging.info("Number of jobs in queue:%s", count)
      printf("\t# Jobs in SQS %s : %s\n",queuename, count)
 
+     
+     timeout = count/10
      all_messages=[]
-     rs=q.get_messages(10)
+     rs=q.get_messages(10, visibility_timeout=timeout)
      while len(rs)>0:
        all_messages.extend(rs)
-       rs=q.get_messages(10)
+       rs=q.get_messages(10, visibility_timeout=timeout)
     # all_messages = q.get_messages(10)
 
      statistics = {}
+     if options.status_SQS:
+          printf("SQS QUEUE: %s\n" %(queuename))
      for m in all_messages:
+        
         if fields==3:
            sample, filename, jobid, _, _, _,_ = parse_message(m.get_body(), fields)
-           printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s\n" %(sample, filename,jobid))
+           if options.status_SQS:
+              printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s\n" %(sample, filename,jobid))
 
         if fields==4:
            sample, filename, jobid, hostname, _, _,_ = parse_message(m.get_body(), fields)
-           printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s;  HOSTNAME\t%s\n" %(sample, filename,jobid, hostname))
+           if options.status_SQS:
+              printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s;  HOSTNAME\t%s\n" %(sample, filename,jobid, hostname))
 
         if fields==5:
            sample, filename, jobid, hostname, time_stamp, _, _ = parse_message(m.get_body(), fields)
-           printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s;  HOSTNAME\t%s; TIME\t%s\n" %(sample, filename,jobid, hostname,time_stamp))
+           if options.status_SQS:
+              if options.verbose:
+                 printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s;  HOSTNAME\t%s; TIME\t%s\n" %(sample, filename,jobid, hostname,time_stamp))
+
+
         if fields==6:
            sample, filename, jobid, hostname, time_stamp,  size, _ = parse_message(m.get_body(), fields)
-           printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s;  HOSTNAME\t%s; TIME\t%s; SIZE\t%s\n" %(sample, filename,jobid, hostname,time_stamp, size))
+           if options.status_SQS:
+              if options.verbose:
+                 printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s;  HOSTNAME\t%s; TIME\t%s; SIZE\t%s\n" %(sample, filename,jobid, hostname,time_stamp, size))
         if fields==7:
            sample, filename, jobid, hostname, time_stamp, size, time_mins  = parse_message(m.get_body(), fields)
-           #printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s;  HOSTNAME\t%s; TIME\t%s; SIZE\t%s; DURATION\t%s\n" %(sample, filename,jobid, hostname,time_stamp, size, time_mins))
+           if options.status_SQS:
+              if options.verbose:
+                 printf("\tReceived: SAMPLE\t%s; FILENAME\t%s; JOBID\t%s;  HOSTNAME\t%s; TIME\t%s; SIZE\t%s; DURATION\t%s\n" %(sample, filename,jobid, hostname,time_stamp, size, time_mins))
             
-           statistics[jobid] = [sample, filename, jobid, hostname, time_stamp, size, time_mins ]
+        statistics[jobid] = [sample, filename, jobid, hostname, time_stamp, size, time_mins ]
 
      return statistics 
 
 
-
 def monitor(options):
-
     submitted = read_status(options, options.submittedqueue, fields=7)
     running =read_status(options, options.runningqueue, fields=7)
     complete = read_status(options, options.completequeue, fields=7)
 
+    if options.status_jobs:
+       print_status_jobs(submitted, running, complete)
+
+    if options.status_servers:
+      current_time =  time.time()
+      servers={}
+      for k, a in complete.iteritems():
+        if not a[3] in servers: 
+           servers[a[3]] = []
+        servers[a[3]].append(float(a[6]))
+
+      printf("%10s\t%5s\t%100s\n", 'TIME', '#TASKS', 'SERVER')
+      for server in servers:
+         printf("%10.2f\t%5d\t%100s\n", (current_time -max(servers[server])*60)/60, len(servers[server]),  server)
+
+
+
+def print_status_jobs(submitted, running, complete): 
+    current_time =  time.time()
+    printf("%12s\t%40s\t%10s\t%10s\t%10s\t%10s\n",'JOBID', 'SAMPLE', 'RUNNING', 'COMPLETE', 'SUB_TIME', 'MINUTES')
     for jobid in submitted:
-       printf("%s\t%s", jobid, submitted[jobid][0]);
+       #print submitted[jobid]  
+       printf("%12s\t%40s", jobid, submitted[jobid][0]);
        if jobid in running:
-           printf("\t%s","RUNNING");
+           printf("\t%10s","RUNNING");
        else:
-           printf("\t%s","       ");
+           printf("\t%10s","WAITING");
 
        if jobid in complete:
-           printf("\t%s","COMPLETE");
+           printf("\t%10s","COMPLETE");
        else:
-           printf("\t%s","       ");
+           printf("\t%10s","       ");
+
+
+       if jobid in running:
+          printf("\t%8.2f", (current_time-float(running[jobid][6])*60)/60)
+       else:
+           printf("\t    ")
 
        if jobid in running and jobid in complete:
-            printf("\t%.2f\n", float(complete[jobid][6])-float(running[jobid][6]))
+            printf("\t%8.2f\n", float(complete[jobid][6])-float(running[jobid][6]))
        else:
-            printf("\t  \n")
+            printf("\t   \n")
 
 
 
@@ -677,10 +729,29 @@ def command(options):
      print 'SMALL :', size['SMALL'], 'MEDIUM :', size['MEDIUM'], 'LARGE :', size['LARGE'],
 
 
+def get_ec2_instances(region):
+
+    ec2_conn = boto.ec2.connect_to_region(region, aws_access_key_id=ACCESS_KEY, aws_secret_access_key=SECRET_KEY)
+    reservations = ec2_conn.get_all_reservations()
+    for reservation in reservations:    
+        print region+':',reservation.instances
+
+    #for vol in ec2_conn.get_all_volumes():
+    #    print region+':',vol.id
+
+
 def main(argv):
   (options, args) = parser.parse_args()
 
   read_key(options.key)
+
+  #regions = ['us-east-1','us-west-1','us-west-2','eu-west-1','sa-east-1', 'ap-southeast-1','ap-southeast-2','ap-northeast-1']
+
+  #for region in regions: 
+  #   get_ec2_instances(region)
+
+  if options.roletype == None:
+      print 'ERROR: Must specify a role-type'
 
   if options.roletype =="submitter":
       submitter(options) 

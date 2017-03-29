@@ -570,7 +570,6 @@ def read_status(options, queuename, fields =3):
      logging.info("Number of jobs in queue:%s", count)
      printf("\t# Jobs in SQS %s : %s\n",queuename, count)
 
-     
      timeout = count/10
      all_messages=[]
      rs=q.get_messages(10, visibility_timeout=timeout)
@@ -626,17 +625,53 @@ def monitor(options):
        print_status_jobs(submitted, running, complete)
 
     if options.status_servers:
+       print_status_servers(running, complete)
+
+
+
+def get_servers_times(states, instance_ips, servers, i):
+     for k in sorted(states.keys()):
+        a = states[k]
+        if a[3] in instance_ips:
+          if not a[3] in servers[i]: 
+             servers[i][a[3]] = []
+          servers[i][a[3]].append(float(a[6]))
+
+
+
+def print_status_servers(running, complete):
+      instance_ips = get_ec2_instances()
       current_time =  time.time()
-      servers={}
-      for k, a in complete.iteritems():
-        if not a[3] in servers: 
-           servers[a[3]] = []
-        servers[a[3]].append(float(a[6]))
+      servers=[ {}, {}  ]
+   
+      get_servers_times(running, instance_ips, servers, 0)
+      get_servers_times(complete, instance_ips, servers, 1)
 
-      printf("%10s\t%5s\t%100s\n", 'TIME', '#TASKS', 'SERVER')
-      for server in servers:
-         printf("%10.2f\t%5d\t%100s\n", (current_time -max(servers[server])*60)/60, len(servers[server]),  server)
+      print servers[0]
+      print servers[1]
 
+      printf("%10s\t%10s\t%10s\t%5s\t%20s\t%15s\t%60s\n", 'NO', 'START_TIME', 'END_TIME', '#TASKS', 'SERVER', 'REGION', 'HOSTNAME')
+      count = 1
+      num_task =0
+
+      for instance in instance_ips:
+           printf("%10d\t", count)
+           if instance in servers[0]:
+              printf("%10.2f\t", (current_time -max(servers[0][instance])*60)/60 ) 
+           else:
+              printf("%12s\t", '-' ) 
+
+           if instance in servers[1]:
+              printf("%10.2f\t%5d\t", (current_time -max(servers[1][instance])*60)/60, len(servers[1][instance]) ) 
+              num_task += len(servers[1][instance])
+           else:
+              printf("%12s\t%5s\t", '-', '-' ) 
+
+           printf("%20s\t%15s\t%60s\n", instance, instance_ips[instance][0], instance_ips[instance][1])
+           count += 1
+
+
+      printf("%10s\t%10s\t%10s\t%5d\n", 'Total','','', num_task)
 
 
 def print_status_jobs(submitted, running, complete): 
@@ -729,13 +764,29 @@ def command(options):
      print 'SMALL :', size['SMALL'], 'MEDIUM :', size['MEDIUM'], 'LARGE :', size['LARGE'],
 
 
-def get_ec2_instances(region):
+def get_ec2_instances():
+     instance_ips = {}
+     regions = ['us-east-1','us-east-2', 'us-west-1','us-west-2', 'eu-west-1', 'eu-west-2', 'eu-central-1', 'ca-central-1', 'eu-west-1','sa-east-1', 'ap-south-1', 'ap-southeast-1','ap-southeast-2','ap-northeast-1']
+     for region in regions: 
+       ips =get_ec2_instances_in_region(region)
+       for key, value in ips.iteritems():
+    
+         ip = re.sub(r'[.]','-', key)
+         instance_ips[ip] = value
+    
+     return instance_ips
 
+def get_ec2_instances_in_region(region):
+    ips = {}
     ec2_conn = boto.ec2.connect_to_region(region, aws_access_key_id=ACCESS_KEY, aws_secret_access_key=SECRET_KEY)
     reservations = ec2_conn.get_all_reservations()
     for reservation in reservations:    
-        print region+':',reservation.instances
+        for instance in reservation.instances:
+           if instance.private_ip_address:
+              ips["ip-" + str(instance.private_ip_address)] = [region,  str(instance.public_dns_name) ]
 
+    return ips
+       
     #for vol in ec2_conn.get_all_volumes():
     #    print region+':',vol.id
 
@@ -744,11 +795,6 @@ def main(argv):
   (options, args) = parser.parse_args()
 
   read_key(options.key)
-
-  #regions = ['us-east-1','us-west-1','us-west-2','eu-west-1','sa-east-1', 'ap-southeast-1','ap-southeast-2','ap-northeast-1']
-
-  #for region in regions: 
-  #   get_ec2_instances(region)
 
   if options.roletype == None:
       print 'ERROR: Must specify a role-type'

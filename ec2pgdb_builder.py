@@ -10,6 +10,7 @@ import optparse
 #pip install -U boto
 
 
+#python ec2pgdb_builder.py --key ~/.ssh/kishori.konwar.csv --role-type worker    --process extract --readyqueue ready_extract --worker_dir ~/ec2pgdb/ --runningqueue running_extract --completequeue complete_extract
 
 REGION = "us-east-1"
 ACCESS_KEY=""
@@ -68,9 +69,9 @@ monitor_group.add_option("--verbose", dest="verbose", action='store_true', defau
 
 parser.add_option_group(monitor_group)
 
-uploader_group = optparse.OptionGroup(parser, 'uploader options')
+uploader_group = optparse.OptionGroup(parser, 'process option')
 #uploader_group.add_option("--sample", dest="samples", action='append', default =[], help="sample name")
-uploader_group.add_option("--pgdbextractinput", dest="pgdbextractinput", default ="pgdbextractinput", help="PGDB extract input bucket [ def: pgdbextractinput ]")
+uploader_group.add_option("--process", dest="process", default ="pathologic", choices= ['pathologic', 'extract'],  help="process pathologic/extract [ def: pathologic]")
 parser.add_option_group(uploader_group)
 
 
@@ -128,6 +129,28 @@ def do_some_work(samplefolder):
    if result[0]==0:
        return True
    return False
+
+def do_some_work_extract(sample, samplecyc):
+   HOME =  os.environ['HOME']
+   cmd = [ HOME + '/ec2pgdb/pwy_extract/libs/python_scripts/MetaPathways_run_pathologic.py',  '--reactions',
+             HOME + '/ec2pgdb/pwy_extract/output/'+ sample + '.metacyc.orf.annots.txt', 
+             '--ptoolsExec',  HOME + '/pathway-tools/pathway-tools', 
+             '-i', HOME +'/ec2pgdb/pwy_extract/' + sample + '/ptools/', 
+             '-p', HOME + '/ptools-local/pgdbs/user/' + samplecyc, 
+             '-s', sample, '--wtd', '--annotation-table',  
+             HOME + '/ec2pgdb/pwy_extract/' + sample + '/' + sample + '.functional_and_taxonomic_table.txt', 
+             '--ncbi-tree',  HOME + '/ec2pgdb/pwy_extract/resouces_files/ncbi_taxonomy_tree.txt', 
+             '--ncbi-megan-map', HOME + '/ec2pgdb/pwy_extract/resouces_files/ncbi.map',
+             '--output-pwy-table', HOME + '/ec2pgdb/pwy_extract/output/' + samplecyc + '.pwy.txt' 
+           ]
+      
+   #result = getstatusoutput(' '.join(cmd))
+
+   if result[0]==0:
+       return True
+   return False
+
+
 
 
 def gunzip_file(outputdir,  tar_gz_file):
@@ -272,10 +295,17 @@ def upload_file_to_s3(options, samplename,  jobid):
    bucket_conn = boto.connect_s3(aws_access_key_id = ACCESS_KEY, aws_secret_access_key=SECRET_KEY)
 
 #   print ACCESS_KEY, SECRET_KEY
-   upload_to_s3_bucket(bucket_conn, options.inputbucket, "/tmp/" + "jobid-" + jobid + "-"+ samplename + ".tar.gz")
+   if options.process=='extract':
+     filepath =  "/tmp/" + "jobeid-" + jobid + "-"+ samplename + ".tar.gz"
+   if options.process=='pathologic':
+     filepath =  "/tmp/" + "jobid-" + jobid + "-"+ samplename + ".tar.gz"
+
+   upload_to_s3_bucket(bucket_conn, options.inputbucket, filepath)
+
    logging.info("Uploaded sample:%s\n", samplename)
    printf("\tuploaded : %s Bucket %s\n", samplename, options.inputbucket)
-   os.remove("/tmp/" + "jobid-" +  jobid + "-" + samplename + ".tar.gz")
+
+   os.remove(filepath)
 
 def submit_sample_name_to_SQS(queuename, samplename, filename, jobid, hostname,  event_time, size, time_min):
    # Send to SQS
@@ -360,7 +390,9 @@ def uploader(options):
        print "UPLOADING : ", sample
        uploader_daemon(options, sample)
 
-def create_upload_file(foldername):
+
+
+def create_upload_file_extract(foldername, jobid):
     import tarfile
 
     samplename = os.path.basename(foldername)
@@ -371,7 +403,7 @@ def create_upload_file(foldername):
     table = foldername + "/results/annotation_table/" + samplename + ".functional_and_taxonomic_table.txt"
 
 
-    with tarfile.open("/tmp/"+ samplename + ".tar.gz", "w:gz") as tar:
+    with tarfile.open("/tmp/"+ "jobeid-" + jobid + "-" + samplename + ".tar.gz", "w:gz") as tar:
        t = tarfile.TarInfo(samplename)
        t.type = tarfile.DIRTYPE
        t.mode = 0755
@@ -398,20 +430,52 @@ def create_upload_file(foldername):
          tar.add(pf, arcname=samplename + '/ptools/reduced.txt')
 
 
-def uploader_daemon(options, samplename):
+def submitter_extract(options):
+    for sample in options.samples:
+       print "SUBMITTING : ", sample
+       submitter_extract_daemon(options, sample)
+
+def submitter_extract_daemon(options, samplename):
     if options.submit_dir!=None:
        if sanity_check(options.submit_dir + "/" + samplename):
          print "\t", "#ORFS : ", count_orfs(options.submit_dir + "/" + samplename )
          num = count_orfs(options.submit_dir + "/" + samplename)
           
-         create_upload_file(options.submit_dir + "/" + samplename)
+         jobid = str(random.randrange(0,1000000000)) 
+         if os.path.exists("/tmp/" + "jobeid-" + jobid + "-" + samplename + ".tar.gz"):
+             os.remove("/tmp/" +  "jobeid-" + jobid + "-" +  samplename + ".tar.gz")
 
-         bucket_conn = boto.connect_s3(aws_access_key_id = ACCESS_KEY, aws_secret_access_key=SECRET_KEY)
+         create_upload_file_extract(options.submit_dir + "/" + samplename, jobid)
 
-         upload_to_s3_bucket(bucket_conn, options.pgdbextractinput, "/tmp/" + samplename + ".tar.gz")
-         logging.info("Uploaded pgdb extract input for  sample:%s\n", samplename + ".tar.gz")
-         printf("\tuploaded : %s Bucket %s\n", samplename, options.pgdbextractinput)
-         os.remove("/tmp/"+ samplename + ".tar.gz")
+         if options.inputbucket != None:
+            upload_file_to_s3(options, samplename, jobid)
+
+            if options.readyqueue != None:
+               filename = "jobeid-" + jobid + "-" + samplename + ".tar.gz"
+               suffix = "_extract"
+
+               submit_time =  str(datetime.datetime.now())
+               submit_min =  str(time.time()/60)
+               hostname = socket.gethostname().strip()
+ 
+               submit_sample_name_to_SQS(options.readyqueue + suffix, samplename, filename, jobid, hostname, submit_time, 'NA', submit_min)
+               submit_sample_name_to_SQS(options.submittedqueue, samplename, filename, jobid, hostname, submit_time, 'NA', submit_min)
+
+
+def create_tarzip_file(foldername, jobid):
+    import tarfile
+
+    pf = foldername + "/ptools/" + "0.pf"
+    gen_elem= foldername + "/ptools/genetic-elements.dat"
+    org_params = foldername + "/ptools/organism-params.dat"
+
+    samplename = os.path.basename(foldername)
+    with tarfile.open("/tmp/"+ "jobid-" + jobid + "-" + samplename + ".tar.gz", "w:gz") as tar:
+       for name in [pf,  gen_elem, org_params] :
+           print "\t", "adding :", name
+           tar.add(name, arcname=os.path.basename(name))
+
+
 
 
 def read_a_message(options):
@@ -432,16 +496,14 @@ def read_a_message(options):
        return None, None, None, None
 
      rs = q.get_messages()
-     print rs[0].get_body()
-
-     m = q.read()
-     print 'm', m
+     m = rs[0]
      msg = str(m.get_body())
-     sample, filename, jobid, hostname, time_stamp, size, duration= parse_message(msg, fields=7)
 
+     sample, filename, jobid, hostname, time_stamp, size, duration= parse_message(msg, fields=7)
 
      if sample==None:
        return None, None, None, None
+
      printf("\tRETRIVED:\n\t\tSAMPLE\t%s\n\t\tFILENAME\t%s\n\t\tJOBID\t%s\n\t\tHOSTNAME\t%s\n\t\tTIME\t%s\n\t\tSIZE\t%s\n\t\tDURATION\t%s\n" %(sample, filename, jobid, hostname,  time_stamp, size, duration  ))
 
      q.delete_message(m)
@@ -450,7 +512,7 @@ def read_a_message(options):
 
 def download_file(bucketname, folder, filename, delete=False):
 
-   printf("\tDownloading : %s\n",  filename)
+   printf("\n\tDownloading : %s\n",  filename)
    bucket_conn= boto.connect_s3(aws_access_key_id = ACCESS_KEY, 
                                         aws_secret_access_key=SECRET_KEY)
    mybucket = bucket_conn.get_bucket(bucketname) # Substitute in your bucket name
@@ -528,6 +590,80 @@ def worker_daemon(options):
              if options.completequeue!=None:
                 print "\tUpdate Complete SQS : %s\n" %(options.completequeue)
                 submit_sample_name_to_SQS(options.completequeue, sample, filename, jobid, hostname,  start_time, size, end_min)
+
+
+
+
+
+def worker_extract(options):
+    if not os.path.exists(options.worker_dir):
+       os.mkdir(options.worker_dir)
+
+    while True:
+      try:
+        worker_daemon_extract(options)
+      except:
+        pass
+      time.sleep(5)
+      
+
+def worker_daemon_extract(options):
+    
+    
+    if options.readyqueue!=None:
+       print "READING :", options.readyqueue
+       sample, filename, jobid, size  = read_a_message(options)
+       #print "\tSAMPLE %s; FILENAME : %s; JOBID : %s\n" %(sample, filename,jobid)
+
+       if filename!=None:
+          ''' Download the inputs containing  ORF annotations'''
+          result = download_file(options.inputbucket, "/tmp/", filename, delete=True)
+          if os.path.exists( options.worker_dir + '/' + sample):
+             shutil.rmtree( options.worker_dir + '/' + sample)
+          os.makedirs(options.worker_dir + '/' + sample)
+          gunzip_file(options.worker_dir + '/',  '/tmp/' + filename)
+          os.remove('/tmp/' + filename)
+
+          '''Download the ePGDB'''
+          filetoget = sample.lower() + "cyc.tar.gz"
+          samplecyc = sample.lower() + "cyc"
+
+          home = os.environ['HOME']
+          if os.path.exists(home + "/ptools-local/pgdbs/user/" + samplecyc):
+              shutil.rmtree(home + "/ptools-local/pgdbs/user/" + samplecyc)
+
+          result = download_file(options.outputbucket, "/tmp/", filetoget, delete=False)
+          gunzip_file(options.worker_dir + '/' + sample + '/',    '/tmp/' + filetoget)
+          os.rename(options.worker_dir + '/' + sample + '/'+ sample, home + "/ptools-local/pgdbs/user/" + samplecyc)
+          os.remove('/tmp/' + filetoget)
+
+          if options.runningqueue!=None:
+             '''Update the SQS running queue'''
+             print "\tUpdate Running SQS : %s\n" %(options.runningqueue)
+             start_time =  str(datetime.datetime.now()) 
+             start_min =  str(time.time()/60) 
+             hostname = socket.gethostname().strip()
+             submit_sample_name_to_SQS(options.runningqueue, sample, filename, jobid, hostname, start_time, size, start_min)
+
+          '''extract the pgdb'''
+
+          success = do_some_work_extract(sample, samplecyc)
+
+          shutil.rmtree( options.worker_dir + '/' + sample)
+          shutil.rmtree(home + "/ptools-local/pgdbs/user/" + samplecyc)
+
+          if success:
+             bucket_conn = boto.connect_s3(aws_access_key_id = ACCESS_KEY, aws_secret_access_key=SECRET_KEY)
+             upload_to_s3_bucket(bucket_conn, options.outputbucket,HOME + '/ec2pgdb/pwy_extract/output/' + samplecyc + '.pwy.txt' )
+             upload_to_s3_bucket(bucket_conn, options.outputbucket, HOME + '/ec2pgdb/pwy_extract/output/' + sample + '.metacyc.orf.annots.txt')
+
+             end_min =  str(time.time()/60)
+             if options.completequeue!=None:
+                print "\tUpdate Complete SQS : %s\n" %(options.completequeue)
+                submit_sample_name_to_SQS(options.completequeue, sample, filename, jobid, hostname,  start_time, size, end_min)
+
+
+
 
 
 def remove_job_from_SQS(queuename, samplename, filename, jobid):
@@ -647,10 +783,7 @@ def print_status_servers(running, complete):
       get_servers_times(running, instance_ips, servers, 0)
       get_servers_times(complete, instance_ips, servers, 1)
 
-      print servers[0]
-      print servers[1]
-
-      printf("%10s\t%10s\t%10s\t%5s\t%20s\t%15s\t%60s\n", 'NO', 'START_TIME', 'END_TIME', '#TASKS', 'SERVER', 'REGION', 'HOSTNAME')
+      printf("%10s\t%10s\t%10s\t%5s\t%20s\t%15s\t%50s\n", 'NO', 'START_TIME', 'END_TIME', '#TASKS', 'SERVER', 'REGION', 'HOSTNAME')
       count = 1
       num_task =0
 
@@ -667,7 +800,7 @@ def print_status_servers(running, complete):
            else:
               printf("%12s\t%5s\t", '-', '-' ) 
 
-           printf("%20s\t%15s\t%60s\n", instance, instance_ips[instance][0], instance_ips[instance][1])
+           printf("%20s\t%15s\t%50s\n", instance, instance_ips[instance][0], instance_ips[instance][1])
            count += 1
 
 
@@ -800,20 +933,22 @@ def main(argv):
       print 'ERROR: Must specify a role-type'
 
   if options.roletype =="submitter":
-      submitter(options) 
-
-  if options.roletype =="uploader":
-      uploader(options) 
+     if options.process=='pathologic':
+        submitter(options) 
+     if options.process=='extract':
+        submitter_extract(options) 
 
   if options.roletype =="worker":
-      worker(options) 
+     if options.process=='pathologic':
+        worker(options) 
+     if options.process=='extract':
+        worker_extract(options) 
 
   if options.roletype =="monitor":
       monitor(options) 
 
   if options.roletype =="command":
       command(options) 
-
 
 
 if __name__ == "__main__":

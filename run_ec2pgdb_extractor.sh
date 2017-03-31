@@ -19,4 +19,6 @@ export DISPLAY=:99
 #sudo chmod +x /etc/init.d/filename 
 #sudo update-rc.d filename defaults 
 
+source /home/ubuntu/ec2pgdb/pwy_extract/MetaPathwaysrc
+
 python /home/ubuntu/ec2pgdb/ec2pgdb_builder.py --key ~/.ssh/kishori.konwar.csv --role-type worker  --process extract --readyqueue ready_extract --worker_dir ~/ec2pgdb/ --runningqueue running_extract --completequeue complete_extract

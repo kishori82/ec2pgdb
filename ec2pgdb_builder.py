@@ -132,7 +132,7 @@ def do_some_work(samplefolder):
 
 def do_some_work_extract(sample, samplecyc):
    HOME =  os.environ['HOME']
-   cmd = [ HOME + '/ec2pgdb/pwy_extract/libs/python_scripts/MetaPathways_run_pathologic.py',  '--reactions',
+   cmd = [ 'python',  HOME + '/ec2pgdb/pwy_extract/libs/python_scripts/MetaPathways_run_pathologic.py',  '--reactions',
              HOME + '/ec2pgdb/pwy_extract/output/'+ sample + '.metacyc.orf.annots.txt', 
              '--ptoolsExec',  HOME + '/pathway-tools/pathway-tools', 
              '-i', HOME +'/ec2pgdb/pwy_extract/' + sample + '/ptools/', 
@@ -144,7 +144,8 @@ def do_some_work_extract(sample, samplecyc):
              '--output-pwy-table', HOME + '/ec2pgdb/pwy_extract/output/' + samplecyc + '.pwy.txt' 
            ]
       
-   #result = getstatusoutput(' '.join(cmd))
+   #print ' '.join(cmd)
+   result = getstatusoutput(' '.join(cmd))
 
    if result[0]==0:
        return True
@@ -645,23 +646,27 @@ def worker_daemon_extract(options):
              hostname = socket.gethostname().strip()
              submit_sample_name_to_SQS(options.runningqueue, sample, filename, jobid, hostname, start_time, size, start_min)
 
-          '''extract the pgdb'''
-
+          '''extract the pathways'''
           success = do_some_work_extract(sample, samplecyc)
-
           shutil.rmtree( options.worker_dir + '/' + sample)
           shutil.rmtree(home + "/ptools-local/pgdbs/user/" + samplecyc)
 
           if success:
              bucket_conn = boto.connect_s3(aws_access_key_id = ACCESS_KEY, aws_secret_access_key=SECRET_KEY)
-             upload_to_s3_bucket(bucket_conn, options.outputbucket,HOME + '/ec2pgdb/pwy_extract/output/' + samplecyc + '.pwy.txt' )
-             upload_to_s3_bucket(bucket_conn, options.outputbucket, HOME + '/ec2pgdb/pwy_extract/output/' + sample + '.metacyc.orf.annots.txt')
+
+             #print options.outputbucket
+             #print "Update Complete SQS : %s\n" %(options.completequeue)
+             #print 'uploading',  home + '/ec2pgdb/pwy_extract/output/' + samplecyc + '.pwy.txt' 
+             #print 'uploading',  home + '/ec2pgdb/pwy_extract/output/' + sample + '.metacyc.orf.annots.txt'
+             upload_to_s3_bucket(bucket_conn, options.outputbucket, home + '/ec2pgdb/pwy_extract/output/' + samplecyc + '.pwy.txt' )
+             upload_to_s3_bucket(bucket_conn, options.outputbucket, home + '/ec2pgdb/pwy_extract/output/' + sample + '.metacyc.orf.annots.txt')
+             os.remove( home + '/ec2pgdb/pwy_extract/output/' + samplecyc + '.pwy.txt' )
+             os.remove(home + '/ec2pgdb/pwy_extract/output/' + sample + '.metacyc.orf.annots.txt')
 
              end_min =  str(time.time()/60)
              if options.completequeue!=None:
                 print "\tUpdate Complete SQS : %s\n" %(options.completequeue)
                 submit_sample_name_to_SQS(options.completequeue, sample, filename, jobid, hostname,  start_time, size, end_min)
-
 
 
 

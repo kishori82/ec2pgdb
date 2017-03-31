@@ -28,6 +28,12 @@ do
 
       python libs/python_scripts/MetaPathways_run_pathologic.py --reactions /home/ubuntu/ec2pgdb/pwy_extract/output/${X}.metacyc.orf.annots.txt --ptoolsExec /home/ubuntu/pathway-tools/pathway-tools -i /home/ubuntu/ec2pgdb/pwy_extract/input/${X}/ptools/ -p /home/ubuntu/ptools-local/pgdbs/user/${Y}cyc -s ${X}  --wtd --annotation-table /home/ubuntu/ec2pgdb/pwy_extract/input/${X}/${X}.functional_and_taxonomic_table.txt  --ncbi-tree /home/ubuntu/ec2pgdb/pwy_extract/resouces_files/ncbi_taxonomy_tree.txt --ncbi-megan-map /home/ubuntu/ec2pgdb/pwy_extract/resouces_files/ncbi.map --output-pwy-table /home/ubuntu/ec2pgdb/pwy_extract/output/${Y}.pwy.txt
       
+      aws s3 cp /home/ubuntu/ec2pgdb/pwy_extract/output/${Y}.pwy.txt  s3://pgdbextractoutput/${Y}.pwy.txt
+      aws s3 cp /home/ubuntu/ec2pgdb/pwy_extract/output/${X}.metacyc.orf.annots.txt s3://pgdbextractoutput/${X}.metacyc.orf.annots.txt 
+      
+      rm  /home/ubuntu/ec2pgdb/pwy_extract/output/${Y}.pwy.txt
+      rm  /home/ubuntu/ec2pgdb/pwy_extract/output/${X}.metacyc.orf.annots.txt 
+
       rm  input/${X}.tar.gz
       rm -rf input/${X}
       rm -rf input/${Y}cyc.tar.gz 

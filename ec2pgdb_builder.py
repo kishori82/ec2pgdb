@@ -497,7 +497,9 @@ def read_a_message(options):
        return None, None, None, None
 
      rs = q.get_messages()
-     m = rs[0]
+     print rs[0].get_body()
+
+     m = q.read()
      msg = str(m.get_body())
 
      sample, filename, jobid, hostname, time_stamp, size, duration= parse_message(msg, fields=7)

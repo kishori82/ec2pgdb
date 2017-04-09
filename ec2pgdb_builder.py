@@ -12,6 +12,8 @@ import optparse
 
 #python ec2pgdb_builder.py --key ~/.ssh/kishori.konwar.csv --role-type worker    --process extract --readyqueue ready_extract --worker_dir ~/ec2pgdb/ --runningqueue running_extract --completequeue complete_extract
 
+#for f in `cat t`; do echo $f; echo python ec2pgdb_builder.py  --key ~/.ssh/kishori.konwar.csv --submitter_dir ~/GLOBAL-STUDY-3.0/output/ --sample $f  --role-type submitter; done
+
 REGION = "us-east-1"
 ACCESS_KEY=""
 SECRET_KEY=""
@@ -720,6 +722,10 @@ def read_status(options, queuename, fields =3):
      conn = boto.sqs.connect_to_region(REGION, 
                                        aws_access_key_id = ACCESS_KEY, 
                                        aws_secret_access_key=SECRET_KEY)
+
+     if options.process=='extract':
+       queuename += '_extract'
+
      q = conn.get_queue(queuename)
      if q==None:
         print "ERROR: SQS my-queue does not exist"
@@ -798,7 +804,7 @@ def get_servers_times(states, instance_ips, servers, i):
 
 
 
-def print_status_servers(running, complete):
+def print_status_servers(running, complete): 
       instance_ips = get_ec2_instances()
       current_time =  time.time()
       servers=[ {}, {}  ]
@@ -806,28 +812,38 @@ def print_status_servers(running, complete):
       get_servers_times(running, instance_ips, servers, 0)
       get_servers_times(complete, instance_ips, servers, 1)
 
-      printf("%10s\t%10s\t%10s\t%5s\t%20s\t%15s\t%50s\n", 'NO', 'START_TIME', 'END_TIME', '#TASKS', 'SERVER', 'REGION', 'HOSTNAME')
+      printf("%4s\t%7s\t%7s\t%6s\t%5s\t%20s\t%15s\t%50s\n\n", 'NO', 'START_T', 'END_T', '#TASKS', 'STAT', 'SERVER', 'REGION', 'HOSTNAME')
+     
       count = 1
       num_task =0
 
       for instance in instance_ips:
-           printf("%10d\t", count)
+           printf("%4d\t", count)
+           start_time  = 10000 
            if instance in servers[0]:
-              printf("%10.2f\t", (current_time -max(servers[0][instance])*60)/60 ) 
+              start_time  = (current_time -max(servers[0][instance])*60)/60 
+              printf("%7.2f\t", (current_time -max(servers[0][instance])*60)/60 ) 
            else:
-              printf("%12s\t", '-' ) 
+              printf("%7.2f\t", start_time ) 
 
+           end_time = 10000
            if instance in servers[1]:
-              printf("%10.2f\t%5d\t", (current_time -max(servers[1][instance])*60)/60, len(servers[1][instance]) ) 
+              end_time=(current_time -max(servers[1][instance])*60)/60 
+              printf("%7.2f\t%6d\t", end_time, len(servers[1][instance]) ) 
               num_task += len(servers[1][instance])
            else:
-              printf("%12s\t%5s\t", '-', '-' ) 
+              printf("%7.2f\t%6s\t", end_time, '-' ) 
+
+           if end_time > start_time:
+                printf("%5s\t", 'BUSY' ) 
+           else:
+                printf("%5s\t", 'IDLE' ) 
 
            printf("%20s\t%15s\t%50s\n", instance, instance_ips[instance][0], instance_ips[instance][1])
            count += 1
 
 
-      printf("%10s\t%10s\t%10s\t%5d\n", 'Total','','', num_task)
+      printf("%4s\t%7s\t%7s\t%7d\n", 'Total','','', num_task)
 
 
 def print_status_jobs(submitted, running, complete): 

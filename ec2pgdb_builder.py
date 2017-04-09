@@ -619,6 +619,7 @@ def worker_daemon_extract(options):
        sample, filename, jobid, size  = read_a_message(options)
        #print "\tSAMPLE %s; FILENAME : %s; JOBID : %s\n" %(sample, filename,jobid)
 
+       print 'file', filename
        if filename!=None:
           ''' Download the inputs containing  ORF annotations'''
           print 'optionsbucket 0', options.outputbucket
@@ -643,6 +644,7 @@ def worker_daemon_extract(options):
           '''Download the ePGDB'''
           filetoget = sample.lower() + "cyc.tar.gz"
           samplecyc = sample.lower() + "cyc"
+          sample_lower = sample.lower() 
 
           home = '/home/ubuntu/'
           if os.path.exists(home + "/ptools-local/pgdbs/user/" + samplecyc):
@@ -652,7 +654,11 @@ def worker_daemon_extract(options):
 
           result = download_file(options.outputbucket, "/tmp/", filetoget, delete=False)
           gunzip_file(options.worker_dir + '/' + sample + '/',    '/tmp/' + filetoget)
-          os.rename(options.worker_dir + '/' + sample + '/'+ sample, home + "/ptools-local/pgdbs/user/" + samplecyc)
+       
+          print sample
+          print 'rename', options.worker_dir + '/' + sample + '/'+ sample_lower, home + "/ptools-local/pgdbs/user/" + samplecyc
+
+          os.rename(options.worker_dir + '/' + sample + '/'+ sample_lower, home + "/ptools-local/pgdbs/user/" + samplecyc)
           os.remove('/tmp/' + filetoget)
 
 

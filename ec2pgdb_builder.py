@@ -1,6 +1,6 @@
 #!/usr/bin/python27
 
-import boto, boto.sqs, boto.ec2, sys, os, time, logging, re, gzip, tarfile, random, shutil, socket, datetime
+import stat, boto, boto.sqs, boto.ec2, sys, os, time, logging, re, gzip, tarfile, random, shutil, socket, datetime
 
 from boto.s3.key import Key
 from boto.sqs.message import Message
@@ -137,7 +137,7 @@ def do_some_work(samplefolder):
    return False
 
 def do_some_work_extract(sample, samplecyc):
-   HOME =  os.environ['HOME']
+   HOME =  '/home/ubuntu/'
    cmd = [ 'python',  HOME + '/ec2pgdb/pwy_extract/libs/python_scripts/MetaPathways_run_pathologic.py',  '--reactions',
              HOME + '/ec2pgdb/pwy_extract/output/'+ sample + '.metacyc.orf.annots.txt', 
              '--ptoolsExec',  HOME + '/pathway-tools/pathway-tools', 
@@ -240,14 +240,12 @@ def retrieve_a_job():
        return False, False
 
      m = q.read()
-     print 'm', m
      msg = str(m.get_body())
      sample, filename = parse_message(msg)
 
      if sample==None:
         return False, False
      printf("Received:SAMPLE\t%s   FILENAME\t%s\n" %(sample, filename))
-
      q.delete_message(m)
 
      return sample, filename
@@ -503,9 +501,12 @@ def read_a_message(options):
        return None, None, None, None
 
      rs = q.get_messages()
-     print rs[0].get_body()
-
+     #print rs[0].get_body()
      m = q.read()
+
+     if m==None:
+       return None, None, None, None
+
      msg = str(m.get_body())
 
      sample, filename, jobid, hostname, time_stamp, size, duration= parse_message(msg, fields=7)
@@ -552,6 +553,8 @@ def worker(options):
        print "ERROR: Must satisfy readyqueue name"
        sys.exit(0)
 
+    
+    time.sleep(180)
     while True:
       worker_daemon(options)
       time.sleep(5)
@@ -579,7 +582,7 @@ def worker_daemon(options):
              submit_sample_name_to_SQS(options.runningqueue, sample, filename, jobid, hostname, start_time, size, start_min)
 
           success = do_some_work(options.worker_dir + '/' + sample)
-          shutil.rmtree( options.worker_dir + '/' + sample)
+          shutil.rmtree( options.worker_dir + '/' + sample, ignore_errors=True)
 
           if success:
              pgdbfolder='/home/ubuntu/ptools-local/pgdbs/user/' + sample.lower() + 'cyc'
@@ -588,7 +591,7 @@ def worker_daemon(options):
                 tar.add(pgdbfolder, arcname=sample.lower())
                 tar.close()
                      
-             shutil.rmtree(pgdbfolder)
+             shutil.rmtree(pgdbfolder, ignore_errors=True)
 
 
              bucket_conn = boto.connect_s3(aws_access_key_id = ACCESS_KEY, aws_secret_access_key=SECRET_KEY)
@@ -609,43 +612,61 @@ def worker_extract(options):
        os.mkdir(options.worker_dir)
 
     while True:
-      try:
-        worker_daemon_extract(options)
-      except:
-        pass
+      worker_daemon_extract(options)
       time.sleep(5)
       
 
 def worker_daemon_extract(options):
-    
     
     if options.readyqueue!=None:
        print "READING :", options.readyqueue
        sample, filename, jobid, size  = read_a_message(options)
        #print "\tSAMPLE %s; FILENAME : %s; JOBID : %s\n" %(sample, filename,jobid)
 
+       print 'file', filename
        if filename!=None:
           ''' Download the inputs containing  ORF annotations'''
+          print 'optionsbucket 0', options.outputbucket
           result = download_file(options.inputbucket, "/tmp/", filename, delete=True)
+          print 'optionsbucket 00', options.outputbucket
+
+          print 'ptions 000',  options.worker_dir  + '/' + sample
           if os.path.exists( options.worker_dir + '/' + sample):
-             shutil.rmtree( options.worker_dir + '/' + sample)
+             print 'optionsbucket 0000', options.outputbucket
+             print 'ptions 00000',  options.worker_dir  + '/' + sample
+             shutil.rmtree(options.worker_dir + '/' + sample, ignore_errors=True)
+             print '--ptions 00000',  options.worker_dir  + '/' + sample
+
+
+          print 'optionsbucket 1', options.outputbucket, options.worker_dir + '/' + sample
           os.makedirs(options.worker_dir + '/' + sample)
+          print 'optionsbucket 10', options.outputbucket
           gunzip_file(options.worker_dir + '/',  '/tmp/' + filename)
+          print 'optionsbucket 1', options.outputbucket, options.worker_dir
           os.remove('/tmp/' + filename)
 
           '''Download the ePGDB'''
           filetoget = sample.lower() + "cyc.tar.gz"
           samplecyc = sample.lower() + "cyc"
+          sample_lower = sample.lower() 
 
-          home = os.environ['HOME']
+          home = '/home/ubuntu/'
           if os.path.exists(home + "/ptools-local/pgdbs/user/" + samplecyc):
-              shutil.rmtree(home + "/ptools-local/pgdbs/user/" + samplecyc)
+              shutil.rmtree(home + "/ptools-local/pgdbs/user/" + samplecyc, ignore_errors=True)
+
+          print 'optionsbucket', options.outputbucket, filetoget
 
           result = download_file(options.outputbucket, "/tmp/", filetoget, delete=False)
           gunzip_file(options.worker_dir + '/' + sample + '/',    '/tmp/' + filetoget)
-          os.rename(options.worker_dir + '/' + sample + '/'+ sample, home + "/ptools-local/pgdbs/user/" + samplecyc)
+       
+          print sample
+          print 'rename', options.worker_dir + '/' + sample + '/'+ sample_lower, home + "/ptools-local/pgdbs/user/" + samplecyc
+
+          os.rename(options.worker_dir + '/' + sample + '/'+ sample_lower, home + "/ptools-local/pgdbs/user/" + samplecyc)
           os.remove('/tmp/' + filetoget)
 
+
+          print 'runnign queue', options.runningqueue 
           if options.runningqueue!=None:
              '''Update the SQS running queue'''
              print "\tUpdate Running SQS : %s\n" %(options.runningqueue)
@@ -655,9 +676,10 @@ def worker_daemon_extract(options):
              submit_sample_name_to_SQS(options.runningqueue, sample, filename, jobid, hostname, start_time, size, start_min)
 
           '''extract the pathways'''
+          print "\tExtract PWY for sample : %s\n" %(sample)
           success = do_some_work_extract(sample, samplecyc)
-          shutil.rmtree( options.worker_dir + '/' + sample)
-          shutil.rmtree(home + "/ptools-local/pgdbs/user/" + samplecyc)
+          shutil.rmtree( options.worker_dir + '/' + sample, ignore_errors=True)
+          shutil.rmtree(home + "/ptools-local/pgdbs/user/" + samplecyc, ignore_errors=True)
 
           if success:
              bucket_conn = boto.connect_s3(aws_access_key_id = ACCESS_KEY, aws_secret_access_key=SECRET_KEY)

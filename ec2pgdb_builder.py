@@ -25,12 +25,16 @@ SMALL=100
 LARGE=1000
 
 #logging.basicConfig(filename='debug.log',level=logging.DEBUG)
-logging.basicConfig(filename='/home/ubuntu/info.log',level=logging.INFO)
+logging.basicConfig(filename='/tmp/info.log',level=logging.INFO)
 
 script_name = sys.argv[0]
-usage = script_name + "--sample <name> --input <input> "
-# Parse command line
-parser = OptionParser()
+usage = script_name + """--sample <name> --input <input> 
+     e.g.      # Parse command line
+          python ec2pgdb_builder.py --key ~/.ssh/kishori.konwar.csv --role-type worker    --process extract --readyqueue ready_extract --worker_dir ~/ec2pgdb/ --runningqueue running_extract --completequeue complete_extract
+
+          for f in `cat t`; do echo $f; echo python ec2pgdb_builder.py  --key ~/.ssh/kishori.konwar.csv --submitter_dir ~/GLOBAL-STUDY-3.0/output/ --sample $f  --role-type submitter; done"""
+
+parser = OptionParser(usage=usage)
 
 
 parser.add_option("--key", dest="key", default ='/home/ubuntu/.ssh/rootkey1.txt', help="the AWS key")
@@ -922,8 +926,10 @@ def command(options):
 
 def get_ec2_instances():
      instance_ips = {}
-     regions = ['us-east-1','us-east-2', 'us-west-1','us-west-2', 'eu-west-1', 'eu-west-2', 'eu-central-1', 'ca-central-1', 'eu-west-1','sa-east-1', 'ap-south-1', 'ap-southeast-1','ap-southeast-2','ap-northeast-1']
+     regions = ['us-east-1','us-east-2', 'us-west-1','us-west-2', 'eu-west-1', 'eu-west-2', 'eu-central-1', 'ca-central-1', 'eu-west-1','sa-east-1']
+   #, 'ap-south-1', 'ap-southeast-1','ap-southeast-2','ap-northeast-1']
      for region in regions: 
+       print region
        ips =get_ec2_instances_in_region(region)
        for key, value in ips.iteritems():
     

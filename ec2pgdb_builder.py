@@ -21,8 +21,8 @@ BUCKET_NAME='pgdbinput1'
 #QUEUE_NAME="crazyqueue1367"
 QUEUE_NAME="crazyqueue1368"
 
-SMALL=100
-LARGE=1000
+SMALL=0
+LARGE=1
 
 #logging.basicConfig(filename='debug.log',level=logging.DEBUG)
 logging.basicConfig(filename='/tmp/info.log',level=logging.INFO)
@@ -32,8 +32,12 @@ usage = script_name + """--sample <name> --input <input>
      e.g.      # Parse command line
           python ec2pgdb_builder.py --key ~/.ssh/kishori.konwar.csv --role-type worker    --process extract --readyqueue ready_extract --worker_dir ~/ec2pgdb/ --runningqueue running_extract --completequeue complete_extract
 
-          for f in `cat t`; do echo $f; echo python ec2pgdb_builder.py  --key ~/.ssh/kishori.konwar.csv --submitter_dir ~/GLOBAL-STUDY-3.0/output/ --sample $f  --role-type submitter; done"""
+#to upload for pathologic
+          for f in `cat t`; do echo $f; echo python ec2pgdb_builder.py  --key ~/.ssh/kishori.konwar.csv --submitter_dir ~/GLOBAL-STUDY-3.0/output/ --sample $f  --role-type submitter; done;
 
+# to extract
+for f in `cat t`; do echo $f;  python ec2pgdb_builder.py  --key ~/.ssh/kishori.konwar.csv --submitter_dir ~/JianTao/output/ --sample $f  --role-type submitter --process extract ; done
+"""
 parser = OptionParser(usage=usage)
 
 
@@ -77,7 +81,7 @@ parser.add_option_group(monitor_group)
 
 uploader_group = optparse.OptionGroup(parser, 'process option')
 #uploader_group.add_option("--sample", dest="samples", action='append', default =[], help="sample name")
-uploader_group.add_option("--process", dest="process", default ="pathologic", choices= ['pathologic', 'extract'],  help="process pathologic/extract [ def: pathologic]")
+uploader_group.add_option("--process", dest="process", default ="pathologic", choices= ['pathologic', 'extract'],  help="process pathologic / extract [ def: pathologic]")
 parser.add_option_group(uploader_group)
 
 
@@ -936,6 +940,7 @@ def command(options):
      size={'SMALL':0, 'MEDIUM':0, 'LARGE':0}
      for samplename in options.samples:
         num = count_orfs(options.submit_dir + "/" + samplename)
+
         if num < SMALL:
             size['SMALL'] += 1
         elif num > SMALL and num < LARGE:

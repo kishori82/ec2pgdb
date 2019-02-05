@@ -1,5 +1,7 @@
 #!/bin/bash 
 
+# Description: This script pulls input from the AWS ready_large and # builds epgdbs and uploads it to th
+
 # Warn and exit if something is already listening on port 1555.
 if [ `netstat -a | fgrep 1555 | fgrep -c LISTEN` == 1 ]; then
   echo Something is already listening on port 1555.
